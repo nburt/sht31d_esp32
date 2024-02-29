@@ -6,7 +6,7 @@ This sensor is meant to integrate with a Greengrass core device. The sensor publ
 Greengrass core can interact with it and decides how frequently to publish the data to the cloud.
 
 When you first boot the device, it will setup an access point. Enter in your wifi ssid and password along with a unique
-identifier for the device. This device ID will be stored via LittleFS and published to the device shadow. 
+identifier for the device. This device ID will be stored via LittleFS and published to the device shadow. The thingName for the device is expected to be `sensor-<device id>`.
 
 ## Development
 
