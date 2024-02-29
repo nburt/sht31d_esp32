@@ -29,7 +29,7 @@ The following libraries must be installed in Arduino IDE:
 
 ## API
 
-This sensor will publish data in the following format to its named device shadow, "readings".
+This sensor will publish data in the following format to its named device shadow, "readings". Temperature is in celsius.
 
 ```json
 {
