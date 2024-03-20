@@ -189,6 +189,11 @@ void loop() {
   String thingName = "sensor-" + sensorId;
   String publishTopic = "$aws/things/" + thingName + "/shadow/name/readings/update";
 
+  if(WiFi.status() != WL_CONNECTED){
+    Serial.println("Wifi Disconnected");
+    ESP.restart();
+  }
+
   client.publish(publishTopic, jsonBuffer);
 
   client.loop();
