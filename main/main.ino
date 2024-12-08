@@ -18,6 +18,8 @@ NTPClient timeClient(ntpUDP, "pool.ntp.org");
 Adafruit_SHT31 sht31 = Adafruit_SHT31();
 WiFiClientSecure net = WiFiClientSecure();
 MQTTClient client = MQTTClient(256);
+unsigned long previousMillis = 0;
+unsigned long interval = 30000;
 
 
 const char* uniqueIdentifierKey = "uniqueID";
@@ -53,6 +55,25 @@ String retrieveStringVariable(const char* filename) {
 
   file.close();
   return data;
+}
+
+void connectMqtt(const String sensorId) {
+  // Connect to the MQTT broker on the AWS endpoint we defined earlier
+  client.begin(AWS_IOT_ENDPOINT, 8883, net);
+
+  String thingName = "sensor-" + sensorId;
+  Serial.println("Connecting to AWS IOT thing name: ");
+  Serial.println(thingName.c_str());
+
+  while (!client.connect(thingName.c_str(), false)) {
+    Serial.println("Connecting...");
+    delay(1000);
+  }
+
+  if(!client.connected()){
+    Serial.println("AWS IoT Timeout!");
+    return;
+  }
 }
 
 void setup() {
@@ -136,67 +157,69 @@ void setup() {
   net.setCertificate(AWS_CERT_CRT);
   net.setPrivateKey(AWS_CERT_PRIVATE);
 
-  // Connect to the MQTT broker on the AWS endpoint we defined earlier
-  client.begin(AWS_IOT_ENDPOINT, 8883, net);
-
-  String thingName = "sensor-" + sensorId;
-  Serial.println("Connecting to AWS IOT thing name: ");
-  Serial.println(thingName.c_str());
-
-  while (!client.connect(thingName.c_str(), false)) {
-    delay(100);
-  }
-
-  if(!client.connected()){
-    Serial.println("AWS IoT Timeout!");
-    return;
-  }
+  connectMqtt(sensorId);
 }
 
 void loop() {
-  // Get and print UTC time
-  Serial.print("Current UTC time: ");
-  // Get UTC time as timestamp
-  unsigned long utcTime = timeClient.getEpochTime();
-   // Format the UTC time as a string
-  char formattedTime[30];
-  snprintf(formattedTime, sizeof(formattedTime), "%04d-%02d-%02dT%02d:%02d:%02dZ",
-           year(utcTime), month(utcTime), day(utcTime),
-           hour(utcTime), minute(utcTime), second(utcTime));
-  Serial.println(formattedTime);
-
-  float temperatureCelsius = sht31.readTemperature();
-  float relativeHumidity = sht31.readHumidity();
-
-  Serial.print("Temperature (C): ");
-  Serial.println(temperatureCelsius);
-  Serial.print("Relative Humidity (%RH): ");
-  Serial.println(relativeHumidity);
-
-  String sensorId = retrieveStringVariable("/data.txt");
-
-  StaticJsonDocument<200> doc;
-  JsonObject state = doc.createNestedObject("state");
-  JsonObject reported = state.createNestedObject("reported");
-
-  reported["sensorId"] = sensorId;
-  reported["time"] = formattedTime;
-  reported["temperature"] = temperatureCelsius;
-  reported["relativeHumidity"] = relativeHumidity;
-  char jsonBuffer[512];
-  serializeJson(doc, jsonBuffer);
-
-  String thingName = "sensor-" + sensorId;
-  String publishTopic = "$aws/things/" + thingName + "/shadow/name/readings/update";
-
-  if(WiFi.status() != WL_CONNECTED){
-    Serial.println("Wifi Disconnected");
-    ESP.restart();
+  unsigned long currentMillis = millis();
+  if ((WiFi.status() != WL_CONNECTED) && (currentMillis - previousMillis >=interval)) {
+    Serial.print(millis());
+    Serial.println("Reconnecting to WiFi...");
+    WiFi.disconnect();
+    WiFi.reconnect();
+    previousMillis = currentMillis;
   }
-
-  client.publish(publishTopic, jsonBuffer);
 
   client.loop();
 
-  delay(10*1000);
+  String sensorId = retrieveStringVariable("/data.txt");
+
+  if (!client.connected()) {
+    connectMqtt(sensorId);
+  }
+
+  // publish a message roughly every second.
+  if (millis() - previousMillis > 10 * 1000) {
+    previousMillis = millis();
+    // Get and print UTC time
+    Serial.print("Current UTC time: ");
+    // Get UTC time as timestamp
+    unsigned long utcTime = timeClient.getEpochTime();
+    // Format the UTC time as a string
+    char formattedTime[30];
+    snprintf(formattedTime, sizeof(formattedTime), "%04d-%02d-%02dT%02d:%02d:%02dZ",
+            year(utcTime), month(utcTime), day(utcTime),
+            hour(utcTime), minute(utcTime), second(utcTime));
+    Serial.println(formattedTime);
+
+    float temperatureCelsius = sht31.readTemperature();
+    float relativeHumidity = sht31.readHumidity();
+
+    Serial.print("Temperature (C): ");
+    Serial.println(temperatureCelsius);
+    Serial.print("Relative Humidity (%RH): ");
+    Serial.println(relativeHumidity);
+
+    StaticJsonDocument<200> doc;
+    JsonObject state = doc.createNestedObject("state");
+    JsonObject reported = state.createNestedObject("reported");
+
+    reported["sensorId"] = sensorId;
+    reported["time"] = formattedTime;
+    reported["temperature"] = temperatureCelsius;
+    reported["relativeHumidity"] = relativeHumidity;
+    char jsonBuffer[512];
+    serializeJson(doc, jsonBuffer);
+
+    String thingName = "sensor-" + sensorId;
+    String publishTopic = "$aws/things/" + thingName + "/shadow/name/readings/update";
+
+    bool published = client.publish(publishTopic, jsonBuffer);
+    
+    if (!published) {
+      Serial.println("Publish failed");
+      Serial.println(client.connected());
+      Serial.println(client.lastError());
+    } 
+  }
 }
